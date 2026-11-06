@@ -1,0 +1,40 @@
+name: Build APK
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - run: npm install
+      - run: mkdir -p www && cp index.html sw.js manifest.json build-config.js icon-192.png icon-512.png www/
+      - run: npx cap add android
+      - run: sed -i 's/<application/<application android:usesCleartextTraffic="true"/' android/app/src/main/AndroidManifest.xml
+      - name: Add microphone permissions
+        run: |
+          sed -i 's#<application#<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <application#' android/app/src/main/AndroidManifest.xml
+          grep -n "RECORD_AUDIO" android/app/src/main/AndroidManifest.xml
+      - name: Firebase (optional, for background push)
+        env:
+          GSJ: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GSJ" ]; then
+            printf '%s' "$GSJ" > android/app/google-services.json
+            echo "window.AHA_FCM=true;" > www/build-config.js
+            echo "Firebase enabled"
+          else
+            echo "window.AHA_FCM=false;" > www/build-config.js
+            echo "Firebase NOT configured (local notifications only)"
+          fi
+      - run: npx cap sync android
+      - run: cd android && chmod +x gradlew && ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: noora-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
